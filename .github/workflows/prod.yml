@@ -1,0 +1,12 @@
+name: deploy-prod
+
+on:
+  push:
+    branches: [prod]
+
+jobs:
+  deploy:
+    uses: ./.github/workflows/reusable-deploy.yml
+    with:
+      environment: prod
+    secrets: inherit
