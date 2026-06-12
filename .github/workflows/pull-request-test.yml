@@ -1,0 +1,44 @@
+name: pull-request-test
+
+on:
+  pull_request:
+    branches: [dev, prod]
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  APP_ENV: dev
+  GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+  MODEL_BUCKET: ${{ vars.MODEL_BUCKET }}
+  MODEL_PREFIX: ${{ vars.MODEL_PREFIX }}
+  TEST_DATA_BUCKET: ${{ vars.TEST_DATA_BUCKET }}
+  TEST_DATA_BLOB: ${{ vars.TEST_DATA_BLOB }}
+  PREDICTIONS_BUCKET: ${{ vars.PREDICTIONS_BUCKET }}
+  PROB_THRESHOLD: ${{ vars.PROB_THRESHOLD }}
+  METRIC_THRESHOLD: ${{ vars.METRIC_THRESHOLD }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOYER_SERVICE_ACCOUNT }}
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Fetch model and test data
+        run: uv run python scripts/fetch_artifacts.py
+
+      - name: Run tests
+        run: uv run pytest
