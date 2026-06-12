@@ -24,4 +24,5 @@ def test_model_micro_f1_above_threshold(classifier, test_examples, settings):
         predicted.append(labels)
 
     f1 = _micro_f1(expected, predicted)
+    print(f"\nmicro F1: {f1:.3f} (threshold: {settings.metric_threshold:.3f})")
     assert f1 >= settings.metric_threshold, f"micro F1 {f1:.3f} < {settings.metric_threshold:.3f}"
