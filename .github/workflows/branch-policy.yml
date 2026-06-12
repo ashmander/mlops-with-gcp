@@ -1,0 +1,28 @@
+name: branch-policy
+
+on:
+  pull_request:
+    branches: [dev, prod]
+
+jobs:
+  validate-source-branch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate PR source branch
+        shell: bash
+        run: |
+          BASE="${{ github.base_ref }}"
+          HEAD="${{ github.head_ref }}"
+          echo "PR: $HEAD -> $BASE"
+
+          if [ "$BASE" = "prod" ] && [ "$HEAD" != "dev" ]; then
+            echo "::error::PRs a prod solo se permiten desde 'dev' (origen recibido: $HEAD)"
+            exit 1
+          fi
+
+          if [ "$BASE" = "dev" ] && [[ ! "$HEAD" =~ ^feature/.+ ]]; then
+            echo "::error::PRs a dev solo se permiten desde 'feature/**' (origen recibido: $HEAD)"
+            exit 1
+          fi
+
+          echo "✓ Branch policy validated"

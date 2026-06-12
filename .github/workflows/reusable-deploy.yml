@@ -1,0 +1,123 @@
+name: reusable-deploy
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+        description: 'Deployment environment (dev or prod)'
+
+env:
+  REGISTRY: gcr.io
+  IMAGE_NAME: models-repo
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v2
+        with:
+          enable-cache: true
+
+      - name: Sync dependencies
+        run: uv sync --frozen
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Fetch model artifacts
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          MODEL_BUCKET: ${{ secrets.MODEL_BUCKET }}
+          MODEL_PREFIX: ${{ secrets.MODEL_PREFIX }}
+          MODEL_ONNX_BLOB: ${{ secrets.MODEL_ONNX_BLOB }}
+          TEST_DATA_BUCKET: ${{ secrets.TEST_DATA_BUCKET }}
+          TEST_DATA_BLOB: ${{ secrets.TEST_DATA_BLOB }}
+        run: uv run python scripts/fetch_artifacts.py
+
+      - name: Run tests
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          MODEL_BUCKET: ${{ secrets.MODEL_BUCKET }}
+          MODEL_PREFIX: ${{ secrets.MODEL_PREFIX }}
+          MODEL_ONNX_BLOB: ${{ secrets.MODEL_ONNX_BLOB }}
+          TEST_DATA_BUCKET: ${{ secrets.TEST_DATA_BUCKET }}
+          TEST_DATA_BLOB: ${{ secrets.TEST_DATA_BLOB }}
+        run: uv run pytest -v
+
+  build-and-deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v2
+        with:
+          enable-cache: true
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for GCR
+        run: gcloud auth configure-docker
+
+      - name: Fetch model artifacts
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          MODEL_BUCKET: ${{ secrets.MODEL_BUCKET }}
+          MODEL_PREFIX: ${{ secrets.MODEL_PREFIX }}
+          MODEL_ONNX_BLOB: ${{ secrets.MODEL_ONNX_BLOB }}
+          TEST_DATA_BUCKET: ${{ secrets.TEST_DATA_BUCKET }}
+          TEST_DATA_BLOB: ${{ secrets.TEST_DATA_BLOB }}
+        run: uv run python scripts/fetch_artifacts.py
+
+      - name: Build Docker image
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        run: |
+          docker build -t ${{ env.REGISTRY }}/${{ secrets.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME }}:${{ inputs.environment }}-${{ github.sha }} .
+          docker tag ${{ env.REGISTRY }}/${{ secrets.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME }}:${{ inputs.environment }}-${{ github.sha }} ${{ env.REGISTRY }}/${{ secrets.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME }}:${{ inputs.environment }}-latest
+
+      - name: Push Docker image
+        run: |
+          docker push ${{ env.REGISTRY }}/${{ secrets.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME }}:${{ inputs.environment }}-${{ github.sha }}
+          docker push ${{ env.REGISTRY }}/${{ secrets.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME }}:${{ inputs.environment }}-latest
+
+      - name: Deploy to Cloud Run
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        run: |
+          gcloud run deploy model-api-${{ inputs.environment }} \
+            --image=${{ env.REGISTRY }}/${{ secrets.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME }}:${{ inputs.environment }}-${{ github.sha }} \
+            --platform=managed \
+            --region=us-central1 \
+            --allow-unauthenticated \
+            --set-env-vars=APP_ENV=${{ inputs.environment }},GCP_PROJECT_ID=${{ secrets.GCP_PROJECT_ID }},MODEL_BUCKET=${{ secrets.MODEL_BUCKET }},MODEL_PREFIX=${{ secrets.MODEL_PREFIX }},MODEL_ONNX_BLOB=${{ secrets.MODEL_ONNX_BLOB }},PREDICTIONS_BUCKET=${{ secrets.PREDICTIONS_BUCKET }},PROB_THRESHOLD=${{ secrets.PROB_THRESHOLD }},METRIC_THRESHOLD=${{ secrets.METRIC_THRESHOLD }} \
+            --project=${{ secrets.GCP_PROJECT_ID }}
