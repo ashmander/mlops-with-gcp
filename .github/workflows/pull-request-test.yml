@@ -38,6 +38,8 @@ jobs:
         run: uv sync --frozen
 
       - name: Fetch model and test data
+        env:
+          PYTHONPATH: .
         run: uv run python scripts/fetch_artifacts.py
 
       - name: Run tests
