@@ -16,7 +16,7 @@ def create_app() -> FastAPI:
     prediction_logger = PredictionLogger(settings)
     inference_service = InferenceService(classifier, prediction_logger)
 
-    app = FastAPI(title="ONNX GoEmotions API", version="0.1.0")
+    app = FastAPI(title="ONNX GoEmotions API V2", version="0.1.0")
     app.state.settings = settings
     app.state.inference_service = inference_service
     app.include_router(health.router)
